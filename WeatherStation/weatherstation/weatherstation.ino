@@ -8,7 +8,7 @@ MAX7219_Dot_Matrix display (chips, 2);  // Chips / LOAD
 unsigned long lastMoved = 0;
 unsigned long MOVE_INTERVAL = 50;  // mS
 int  messageOffset;
-char message [] = "09:00 clear sky -99.99 / 18:00 clear sky -99.99";
+char message [100];
 
 const char* WIFI_SSID = "your wifi ssid";
 const char* WIFI_PASS = "your wifi password";
