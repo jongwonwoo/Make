@@ -14,7 +14,12 @@ const char* WIFI_SSID = "your wifi ssid";
 const char* WIFI_PASS = "your wifi password";
 
 const int UPDATE_INTERVAL_SECS = 60 * 10;
-long lastDownloadUpdate = 0;
+long lastUpdateWeatherData = 0;
+
+const int MAX_WAIT_SECS = 15;
+
+const int MAX_RETRY_COUNT = 3;
+int retryCount = 0;
 
 String APIKEY = "your api key";
 String CityID = "your city";
@@ -48,19 +53,46 @@ void loop() {
 
 // Weather Data
 void updateWeatherDataIfNeeded() {
-  if (lastDownloadUpdate == 0 || (millis() - lastDownloadUpdate > 1000 * UPDATE_INTERVAL_SECS)) {
+  if (lastUpdateWeatherData == 0 || (millis() - lastUpdateWeatherData > 1000 * UPDATE_INTERVAL_SECS)) {
+    Serial.println("updateWeatherDataIfNeeded");
+    lastUpdateWeatherData = millis();
+    retryCount = 0;
+    
     updateWeatherData();
-    lastDownloadUpdate = millis();
+  }
+}
+
+void retryUpdateWeatherData() {
+  if (retryCount < MAX_RETRY_COUNT) {
+    retryCount++;
+    updateWeatherData();
   }
 }
 
 void updateWeatherData() {
-  getWeatherData();
+  Serial.println("update data");
+  String weatherData = getWeatherData();
+  if (weatherData.length() == 0) {
+    Serial.println("retry");
+    retryUpdateWeatherData();
+    return;
+  }
+  
+  String current = currentWeather(weatherData);
+  String later = laterWeather(weatherData);
+  if (current.length() == 0 || later.length() == 0) {
+    Serial.println("retry 2");
+    retryUpdateWeatherData();
+    return;
+  }
+  
+  String weatherMessage = current + " / " + later;
+  Serial.println(weatherMessage);
+  showWeather(weatherMessage);
 }
 
-void getWeatherData() {
-  String result = "";
-  
+String getWeatherData() {
+  Serial.println("Getting Weather Data");
   if (client.connect(servername, 80)) {
     String cnt = "5";
     client.println("GET /data/2.5/forecast?id="+CityID+"&units=metric&cnt="+cnt+"&APPID="+APIKEY);
@@ -68,34 +100,31 @@ void getWeatherData() {
     client.println("User-Agent: ArduinoWiFi/1.1");
     client.println("Connection: close");
     client.println();
-  } 
-  else {
+  } else {
     Serial.println("connection failed");
     Serial.println();
+    client.stop();
+    return "";
   }
-
-  while(client.connected() && !client.available()) {
-    delay(1); //waits for data
-  }
-
-  Serial.println("Waiting for data");
-
-  while (client.connected() || client.available()) {
-    char c = client.read();
-    result = result+c;
+  
+  Serial.println("Reading data");
+  long waitResponse = millis();
+  String result = "";
+  while (client.connected()) {
+    if (millis() - waitResponse < 1000 * MAX_WAIT_SECS) {
+      if (client.available()) {
+        result = client.readStringUntil('\r');
+        Serial.println(result); 
+      }  
+    } else {
+      Serial.println("timeout of reading data");
+      client.stop();
+      return "";
+    }
   }
 
   client.stop();
-
-  String current = currentWeather(result);
-  String later = laterWeather(result);
-  if (current.length() == 0 || later.length() == 0) {
-    updateWeatherData();
-    return;
-  }
-  
-  String weatherMessage = current + " / " + later;
-  showWeather(weatherMessage);
+  return result;
 }
 
 String currentWeather(String source) {
@@ -158,6 +187,9 @@ String makeWeatherMessage(String jsonString) {
   String idString = root["weather"][0]["id"];
   int weatherId = idString.toInt();
 
+  Serial.println(timeS);
+  Serial.println(temperature);
+  Serial.println(description);
   String weatherMessage = timeS + " " + description + " " + temperature;
 
   return weatherMessage;
@@ -207,6 +239,7 @@ void connectWifi() {
   WiFi.begin(WIFI_SSID,WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
+    Serial.println("Waiting for Connection to WiFi");
   }
   Serial.println("Connected");
 }
